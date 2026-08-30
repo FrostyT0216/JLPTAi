@@ -1,0 +1,18 @@
+# 临时文件
+.tmp-pack/
+
+# 本地要求文档（不想公开的话）
+要求文档.md
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器
+.vscode/
+.idea/
+
+# 依赖与日志
+node_modules/
+*.log
