@@ -115,7 +115,17 @@
         </div>
         <div class="progress progress-wide"><div class="progress-bar" id="exam-progress"></div></div>
       </header>
-      <div class="scroll-content" id="exam-content"></div>
+      <div class="review-body">
+        <div class="review-passage" id="exam-passage"></div>
+        <div class="review-panel">
+          <div class="review-strip">
+            <button class="strip-btn" id="btn-exam-q-prev" aria-label="上一問"><svg class="ic" viewBox="1.83 1.89 6.31 6.31"><path d="M1.844 5.184a.8.8 0 0 1 0-.313c.057-.288.341-.513.908-.961l1.81-1.43a.664.664 0 1 1 .817 1.047l-.023.018c-.397.305-.596.458-.567.6a.2.2 0 0 0 .018.053c.063.13.314.13.816.13h1.816a.7.7 0 0 1 0 1.4H5.53c-.47 0-.706 0-.77.126a.2.2 0 0 0-.019.052c-.032.137.148.289.507.593l.165.14a.632.632 0 0 1-.8.978L2.751 6.145c-.567-.448-.85-.672-.908-.96"/></svg></button>
+            <div class="review-dots" id="exam-dots"></div>
+            <button class="strip-btn" id="btn-exam-q-next" aria-label="下一問"><svg class="ic" viewBox="1.83 1.89 6.31 6.31"><path d="M8.122 4.905a.8.8 0 0 1 0 .314c-.057.288-.34.512-.908.96L5.404 7.61a.664.664 0 1 1-.817-1.048l.023-.017c.397-.306.596-.459.567-.6a.2.2 0 0 0-.018-.054c-.063-.13-.314-.13-.816-.13H2.528a.7.7 0 0 1 0-1.4h1.907c.47 0 .706 0 .77-.125a.2.2 0 0 0 .02-.053c.031-.137-.149-.289-.508-.593l-.165-.139a.632.632 0 0 1 .8-.979l1.862 1.472c.567.449.85.673.908.961"/></svg></button>
+          </div>
+          <div class="review-pages" id="exam-pages"></div>
+        </div>
+      </div>
       <footer class="footer-bar footer-bar-exam">
         <button class="btn-exam-nav" id="btn-exam-prev" aria-label="上一题"><svg class="ic" viewBox="1.83 1.89 6.31 6.31"><path d="M1.844 5.184a.8.8 0 0 1 0-.313c.057-.288.341-.513.908-.961l1.81-1.43a.664.664 0 1 1 .817 1.047l-.023.018c-.397.305-.596.458-.567.6a.2.2 0 0 0 .018.053c.063.13.314.13.816.13h1.816a.7.7 0 0 1 0 1.4H5.53c-.47 0-.706 0-.77.126a.2.2 0 0 0-.019.052c-.032.137.148.289.507.593l.165.14a.632.632 0 0 1-.8.978L2.751 6.145c-.567-.448-.85-.672-.908-.96"/></svg>上一题</button>
         <button class="btn-primary btn-submit" id="btn-exam-next">下一题<svg class="ic" viewBox="1.83 1.89 6.31 6.31"><path d="M8.122 4.905a.8.8 0 0 1 0 .314c-.057.288-.34.512-.908.96L5.404 7.61a.664.664 0 1 1-.817-1.048l.023-.017c.397-.306.596-.459.567-.6a.2.2 0 0 0-.018-.054c-.063-.13-.314-.13-.816-.13H2.528a.7.7 0 0 1 0-1.4h1.907c.47 0 .706 0 .77-.125a.2.2 0 0 0 .02-.053c.031-.137-.149-.289-.508-.593l-.165-.139a.632.632 0 0 1 .8-.979l1.862 1.472c.567.449.85.673.908.961"/></svg></button>
@@ -261,7 +271,7 @@
              · 请确保 API 服务允许浏览器跨域（CORS）。<br>
              · iOS 添加到主屏幕后可全屏使用；建议通过静态服务器访问以便离线缓存。</p>
         </div>
-        <div class="footer-note">JLPT 読解トレーナー v1.3 · 图标来自 Game Icon Pack (CC0) · <a href="./docs/数据导出导入教程.md" target="_blank" style="color:var(--accent)">导出导入教程</a></div>
+        <div class="footer-note">JLPT 読解トレーナー v1.4 · 图标来自 Game Icon Pack (CC0) · <a href="./docs/数据导出导入教程.md" target="_blank" style="color:var(--accent)">导出导入教程</a></div>
       </div>
     </section>
 

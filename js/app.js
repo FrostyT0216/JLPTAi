@@ -280,34 +280,70 @@
     const exam = state.exam;
     const p = exam.passages[state.examIndex];
     $('exam-nav-title').textContent = exam.title;
-    const box = $('exam-content');
-    box.innerHTML = '';
+    state.examQIndex = 0;
 
     // 全局题号：前面各篇题数之和
     let qNo = 0;
     for (let i = 0; i < state.examIndex; i++) qNo += exam.passages[i].questions.length;
 
-    const card = document.createElement('div');
-    card.className = 'card passage-card';
-    let html = `<span class="passage-genre">${escapeHTML(Generator.GENRE_FULL[p.genreTag] || p.genreTag)}</span>
-      <div class="passage-title">${escapeHTML(p.title)}</div>
-      <div class="passage-text">${escapeHTML(p.text)}</div>`;
-    html += `<div class="question-block">`;
+    // ── 上半：原文 ──
+    const passage = $('exam-passage');
+    passage.innerHTML =
+      `<span class="passage-genre">${escapeHTML(Generator.GENRE_FULL[p.genreTag] || p.genreTag)}</span>
+       <div class="passage-title">${escapeHTML(p.title)}</div>
+       <div class="passage-text">${escapeHTML(p.text)}</div>`;
+    passage.scrollTop = 0;
+
+    // ── 下半：小题分页（复用解析页面板） ──
+    let html = '';
     p.questions.forEach((q, qi) => {
       qNo++;
-      html += `<div class="review-q question-prompt"><span class="q-num">${qNo}</span><span>${escapeHTML(q.prompt)}</span></div>`;
+      html += `<div class="review-page"><div class="review-page-inner">`;
+      html += `<div class="review-q"><span class="q-num">${qNo}</span><span>${escapeHTML(q.prompt)}</span></div>`;
       q.options.forEach((opt, oi) => {
         const sel = state.answers[p.id] && state.answers[p.id][qi] === oi;
         html += `<button class="option${sel ? ' selected' : ''}" data-p="${p.id}" data-q="${qi}" data-o="${oi}">
           <span class="opt-mark">${OPT_MARKS[oi]}</span><span>${escapeHTML(opt)}</span></button>`;
       });
+      html += `</div></div>`;
     });
-    html += `</div>`;
-    card.innerHTML = html;
-    box.appendChild(card);
+    const pages = $('exam-pages');
+    pages.innerHTML = html;
 
+    // 指示点
+    $('exam-dots').innerHTML = p.questions.map((_, i) =>
+      `<span class="review-dot${i === 0 ? ' active' : ''}"></span>`).join('');
+    pages.scrollLeft = 0;
+
+    // 小题页切换（滑动 + 按钮）
+    const goTo = (i, smooth = true) => {
+      const page = pages.children[i];
+      if (page) pages.scrollTo({ left: page.offsetLeft - pages.children[0].offsetLeft, behavior: smooth ? 'smooth' : 'auto' });
+    };
+    $('btn-exam-q-prev').onclick = () => goTo(Math.max(0, state.examQIndex - 1));
+    $('btn-exam-q-next').onclick = () => goTo(Math.min(p.questions.length - 1, state.examQIndex + 1));
+    pages.onscroll = () => {
+      const base = pages.children[0].offsetLeft;
+      let idx = 0, best = Infinity;
+      Array.from(pages.children).forEach((c, i) => {
+        const dist = Math.abs(c.offsetLeft - base - pages.scrollLeft);
+        if (dist < best) { best = dist; idx = i; }
+      });
+      if (idx === state.examQIndex) return;
+      state.examQIndex = idx;
+      syncExamQUI(p);
+    };
+
+    syncExamQUI(p);
     updateExamProgress();
-    box.scrollTop = 0;
+  }
+
+  function syncExamQUI(p) {
+    const qi = state.examQIndex;
+    $('exam-dots').querySelectorAll('.review-dot').forEach((d, i) =>
+      d.classList.toggle('active', i === qi));
+    $('btn-exam-q-prev').classList.toggle('disabled', qi === 0);
+    $('btn-exam-q-next').classList.toggle('disabled', qi === p.questions.length - 1);
   }
 
   function updateExamProgress() {
@@ -327,7 +363,7 @@
     $('btn-exam-prev').classList.toggle('disabled', state.examIndex === 0);
   }
 
-  $('exam-content').addEventListener('click', e => {
+  $('exam-pages').addEventListener('click', e => {
     const btn = e.target.closest('.option');
     if (!btn) return;
     const pid = btn.dataset.p, qi = +btn.dataset.q, oi = +btn.dataset.o;
@@ -335,7 +371,7 @@
     state.answers[pid][qi] = state.answers[pid][qi] === oi ? undefined : oi;
     if (state.answers[pid][qi] === undefined) delete state.answers[pid][qi];
     // 局部刷新选中态
-    btn.parentElement.querySelectorAll('.option').forEach(x => {
+    btn.closest('.review-page').querySelectorAll('.option').forEach(x => {
       if (+x.dataset.q === qi) x.classList.remove('selected');
     });
     if (state.answers[pid][qi] != null) btn.classList.add('selected');

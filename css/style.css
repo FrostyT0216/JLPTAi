@@ -342,7 +342,6 @@ input, select { font: inherit; color: var(--label); }
 .summary-meta { font-size: 13px; color: var(--label-2); line-height: 1.5; }
 
 /* ───── 考试页 ───── */
-.passage-card { margin: 12px 0; }
 .passage-genre {
   display: inline-block; font-size: 12px; font-weight: 600;
   color: var(--accent); background: var(--accent-soft);
@@ -355,8 +354,6 @@ input, select { font: inherit; color: var(--label); }
   font-feature-settings: "palt";
 }
 .passage-source { font-size: 12px; color: var(--label-3); margin-top: 10px; }
-.question-block { margin: 10px 0 0; }
-.question-prompt { font-size: 15.5px; font-weight: 600; margin-bottom: 10px; display: flex; gap: 6px; }
 .q-num {
   flex: none; width: 22px; height: 22px; border-radius: 50%;
   background: linear-gradient(160deg, var(--accent-2), var(--accent));
@@ -619,6 +616,8 @@ select { appearance: none; -webkit-appearance: none; }
 /* ───── 考试页逐篇作答 ───── */
 .footer-bar-exam { display: flex; gap: 10px; align-items: center; }
 .footer-bar-exam .btn-submit { flex: 1; margin: 0; }
+/* 考试页选项面板复用解析页样式，为底部悬浮按钮留出空间 */
+#exam-pages .review-page-inner { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
 .btn-exam-nav {
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;
   min-height: 52px; padding: 0 18px;
@@ -730,7 +729,7 @@ select { appearance: none; -webkit-appearance: none; }
 .review-dot.active { width: 20px; background: var(--accent); }
 .review-pages {
   flex: 1; min-height: 0;
-  display: flex; gap: 12px;
+  display: flex; gap: 36px;
   overflow-x: auto; overflow-y: hidden;
   scroll-snap-type: x mandatory;
   scroll-padding-left: max(16px, env(safe-area-inset-left));
