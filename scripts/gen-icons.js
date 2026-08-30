@@ -1,8 +1,9 @@
-/* 生成 PWA/苹果触屏图标（纯 Node，无依赖） */
+/* 生成 PWA/苹果触屏/网站图标 — 图形来自图标库 icons/svg/book.svg，主题绿色（纯 Node，无依赖） */
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 
+/* ───── PNG 编码 ───── */
 function crc32(buf) {
   let table = crc32.table;
   if (!table) {
@@ -46,63 +47,238 @@ function png(size, pixelFn) {
   ]);
 }
 
-/* 多边形内部测试（兼容任意绕向） */
-function inPoly(px, py, poly) {
-  let pos = false, neg = false;
-  for (let i = 0; i < poly.length; i++) {
-    const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length];
-    const cross = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
-    if (cross > 0) pos = true; else if (cross < 0) neg = true;
+/* ───── SVG path 解析（M/L/H/V/C/S/Q/T/A/Z，曲线扁平化） ───── */
+/* 注意：圆弧的 large-arc/sweep 标志位是单个 0/1 字符，可能与后续数字连写（如 "0 0 1.106.048"），
+   必须按命令上下文逐字符解析，不能整体正则分词。 */
+function flattenPath(d) {
+  let i = 0;
+  const len = d.length;
+  const skipWs = () => { while (i < len && ' ,\t\n\r'.includes(d[i])) i++; };
+  function readNum() {
+    skipWs();
+    const m = /^[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/.exec(d.slice(i));
+    if (!m) throw new Error('数字解析失败 @' + i);
+    i += m[0].length;
+    return parseFloat(m[0]);
   }
-  return !(pos && neg);
-}
+  function readFlag() {
+    skipWs();
+    const f = d[i];
+    if (f !== '0' && f !== '1') throw new Error('标志位解析失败 @' + i);
+    i++;
+    return +f;
+  }
+  const isCmd = ch => ch && 'MmLlHhVvCcSsQqTtAaZz'.includes(ch);
 
-const LEFT_PAGE = [[0.13, 0.20], [0.47, 0.285], [0.47, 0.76], [0.13, 0.675]];
-const RIGHT_PAGE = [[0.87, 0.20], [0.53, 0.285], [0.53, 0.76], [0.87, 0.675]];
-const SPINE = [[0.488, 0.24], [0.512, 0.24], [0.512, 0.78], [0.488, 0.78]];
+  const polys = [];
+  let poly = [];
+  let x = 0, y = 0, sx = 0, sy = 0, cmd = '', pc = null, pqc = null;
+  const flush = () => { if (poly.length > 2) polys.push(poly); poly = []; };
+  const pt = (a, b) => { poly.push([a, b]); };
 
-function iconPixel(nx, ny) {
-  // 背景：对角渐变 iOS 蓝
-  const t = Math.min(1, Math.max(0, (nx + ny) / 2));
-  const bg = [
-    Math.round(0x3A + (0x00 - 0x3A) * t),
-    Math.round(0x9C + (0x51 - 0x9C) * t),
-    Math.round(0xFF + (0xD8 - 0xFF) * t),
-    255
-  ];
-  // 书页（白色）：左右镜像映射到左页多边形
-  const bookX = 0.5 - Math.abs(nx - 0.5);
-  const bookY = ny;
-  let color = bg;
-  if (inPoly(bookX, bookY, LEFT_PAGE)) color = [255, 255, 255, 255];
-  // 中缝镂空
-  if (inPoly(nx, ny, SPINE) && ny > 0.27 && ny < 0.76) color = bg;
-  return color;
-}
+  const cubic = (x1, y1, c1x, c1y, c2x, c2y, x2, y2) => {
+    const SEG = 20;
+    for (let k = 1; k <= SEG; k++) {
+      const t = k / SEG, u = 1 - t;
+      pt(u * u * u * x1 + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * x2,
+         u * u * u * y1 + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * y2);
+    }
+  };
+  const quad = (x1, y1, cx, cy, x2, y2) => {
+    const SEG = 16;
+    for (let k = 1; k <= SEG; k++) {
+      const t = k / SEG, u = 1 - t;
+      pt(u * u * x1 + 2 * u * t * cx + t * t * x2,
+         u * u * y1 + 2 * u * t * cy + t * t * y2);
+    }
+  };
+  const arc = (x1, y1, rx, ry, phiDeg, fA, fS, x2, y2) => {
+    if (rx === 0 || ry === 0 || (x1 === x2 && y1 === y2)) { pt(x2, y2); return; }
+    rx = Math.abs(rx); ry = Math.abs(ry);
+    const phi = phiDeg * Math.PI / 180, cos = Math.cos(phi), sin = Math.sin(phi);
+    const dx2 = (x1 - x2) / 2, dy2 = (y1 - y2) / 2;
+    const x1p = cos * dx2 + sin * dy2, y1p = -sin * dx2 + cos * dy2;
+    let rx2 = rx * rx, ry2 = ry * ry;
+    const lam = x1p * x1p / rx2 + y1p * y1p / ry2;
+    if (lam > 1) { const s = Math.sqrt(lam); rx *= s; ry *= s; rx2 = rx * rx; ry2 = ry * ry; }
+    const num = rx2 * ry2 - rx2 * y1p * y1p - ry2 * x1p * x1p;
+    const den = rx2 * y1p * y1p + ry2 * x1p * x1p;
+    let co = Math.sqrt(Math.max(0, num / den));
+    if (fA === fS) co = -co;
+    const cxp = co * rx * y1p / ry, cyp = -co * ry * x1p / rx;
+    const cx = cos * cxp - sin * cyp + (x1 + x2) / 2;
+    const cy = sin * cxp + cos * cyp + (y1 + y2) / 2;
+    const th1 = Math.atan2((y1p - cyp) / ry, (x1p - cxp) / rx);
+    const th2 = Math.atan2((-y1p - cyp) / ry, (-x1p - cxp) / rx);
+    let dT = th2 - th1;
+    if (!fS && dT > 0) dT -= 2 * Math.PI;
+    if (fS && dT < 0) dT += 2 * Math.PI;
+    const SEG = 16;
+    for (let k = 1; k <= SEG; k++) {
+      const t = th1 + dT * k / SEG;
+      pt(cos * rx * Math.cos(t) - sin * ry * Math.sin(t) + cx,
+         sin * rx * Math.cos(t) + cos * ry * Math.sin(t) + cy);
+    }
+  };
 
-// 镂空横线：在书页白色区域内画背景渐变色线，模拟文字行
-function iconPixelFinal(nx, ny) {
-  const [r, g, b, a] = iconPixel(nx, ny);
-  const isWhite = r > 240 && g > 240 && b > 240;
-  if (!isWhite) return [r, g, b, a];
-  const slope = 0.085 * (Math.abs(nx - 0.5) - 0.13) / 0.34;
-  const lines = [0.40, 0.50, 0.60];
-  for (const ly of lines) {
-    if (Math.abs(nx - 0.5) > 0.09 && Math.abs(nx - 0.5) < 0.31 && Math.abs(ny - (ly + slope)) < 0.02) {
-      const t2 = Math.min(1, Math.max(0, (nx + ny) / 2));
-      return [
-        Math.round(0x3A + (0x00 - 0x3A) * t2),
-        Math.round(0x9C + (0x51 - 0x9C) * t2),
-        Math.round(0xFF + (0xD8 - 0xFF) * t2), 255];
+  while (i < len) {
+    skipWs();
+    if (i >= len) break;
+    if (isCmd(d[i])) { cmd = d[i]; i++; }
+    switch (cmd) {
+      case 'M': case 'm': {
+        let fx = readNum(), fy = readNum();
+        if (cmd === 'm') { fx += x; fy += y; }
+        flush(); pt(fx, fy);
+        x = fx; y = fy; sx = fx; sy = fy; pc = null; pqc = null;
+        cmd = cmd === 'm' ? 'l' : 'L';
+        break;
+      }
+      case 'L': { x = readNum(); pt(x, y); break; }
+      case 'l': { x += readNum(); pt(x, y); break; }
+      case 'H': { x = readNum(); pt(x, y); break; }
+      case 'h': { x += readNum(); pt(x, y); break; }
+      case 'V': { y = readNum(); pt(x, y); break; }
+      case 'v': { y += readNum(); pt(x, y); break; }
+      case 'C': {
+        const c1x = readNum(), c1y = readNum(), c2x = readNum(), c2y = readNum();
+        const x2 = readNum(), y2 = readNum();
+        cubic(x, y, c1x, c1y, c2x, c2y, x2, y2);
+        pc = [c2x, c2y]; x = x2; y = y2; break;
+      }
+      case 'c': {
+        const c1x = x + readNum(), c1y = y + readNum();
+        const c2x = x + readNum(), c2y = y + readNum();
+        const x2 = x + readNum(), y2 = y + readNum();
+        cubic(x, y, c1x, c1y, c2x, c2y, x2, y2);
+        pc = [c2x, c2y]; x = x2; y = y2; break;
+      }
+      case 'S': case 's': {
+        let C2X, C2Y, X2, Y2;
+        if (cmd === 's') { C2X = x + readNum(); C2Y = y + readNum(); X2 = x + readNum(); Y2 = y + readNum(); }
+        else { C2X = readNum(); C2Y = readNum(); X2 = readNum(); Y2 = readNum(); }
+        const refX = pc ? 2 * x - pc[0] : x, refY = pc ? 2 * y - pc[1] : y;
+        cubic(x, y, refX, refY, C2X, C2Y, X2, Y2);
+        pc = [C2X, C2Y]; x = X2; y = Y2; break;
+      }
+      case 'Q': case 'q': {
+        let cx, cy, X2, Y2;
+        if (cmd === 'q') { cx = x + readNum(); cy = y + readNum(); X2 = x + readNum(); Y2 = y + readNum(); }
+        else { cx = readNum(); cy = readNum(); X2 = readNum(); Y2 = readNum(); }
+        quad(x, y, cx, cy, X2, Y2);
+        pqc = [cx, cy]; x = X2; y = Y2; break;
+      }
+      case 'T': case 't': {
+        let X2, Y2;
+        if (cmd === 't') { X2 = x + readNum(); Y2 = y + readNum(); }
+        else { X2 = readNum(); Y2 = readNum(); }
+        const cx = pqc ? 2 * x - pqc[0] : x, cy = pqc ? 2 * y - pqc[1] : y;
+        quad(x, y, cx, cy, X2, Y2);
+        pqc = [cx, cy]; x = X2; y = Y2; break;
+      }
+      case 'A': case 'a': {
+        const rx = readNum(), ry = readNum(), rot = readNum();
+        const fA = readFlag(), fS = readFlag();
+        let X2, Y2;
+        if (cmd === 'a') { X2 = x + readNum(); Y2 = y + readNum(); }
+        else { X2 = readNum(); Y2 = readNum(); }
+        arc(x, y, rx, ry, rot, fA, fS, X2, Y2);
+        x = X2; y = Y2; pc = null; pqc = null; break;
+      }
+      case 'Z': case 'z': {
+        flush(); x = sx; y = sy; pc = null; pqc = null; break;
+      }
+      default: {
+        throw new Error('不支持的路径命令: ' + cmd);
+      }
     }
   }
-  return [r, g, b, a];
+  flush();
+  return polys;
 }
 
-const outDir = path.join(__dirname, '..', 'icons');
+/* ───── 偶奇扫描线栅格化（4× 超采样抗锯齿） ───── */
+function rasterize(polys, size, SS) {
+  const RES = size * SS;
+  const mask = new Uint8Array(RES * RES);
+  const edges = [];
+  for (const poly of polys) {
+    for (let k = 0; k < poly.length; k++) {
+      const [x1, y1] = poly[k], [x2, y2] = poly[(k + 1) % poly.length];
+      if (y1 !== y2) edges.push([x1, y1, x2, y2]);
+    }
+  }
+  for (let j = 0; j < RES; j++) {
+    const y = (j + 0.5) / RES;
+    const xs = [];
+    for (const [x1, y1, x2, y2] of edges) {
+      const yMin = Math.min(y1, y2), yMax = Math.max(y1, y2);
+      if (y >= yMin && y < yMax) xs.push(x1 + (y - y1) * (x2 - x1) / (y2 - y1));
+    }
+    if (!xs.length) continue;
+    xs.sort((a, b) => a - b);
+    const row = j * RES;
+    for (let k = 0; k + 1 < xs.length; k += 2) {
+      const a = Math.max(0, Math.round(xs[k] * RES));
+      const b = Math.min(RES, Math.ceil(xs[k + 1] * RES));
+      for (let p = a; p < b; p++) mask[row + p] = 1;
+    }
+  }
+  return mask;
+}
+
+/* ───── 主流程：读取图标库 book.svg → 生成主题绿图标 ───── */
+const ROOT = path.join(__dirname, '..');
+const svgSource = fs.readFileSync(path.join(ROOT, 'icons', 'svg', 'book.svg'), 'utf8');
+const dMatch = svgSource.match(/ d="([^"]+)"/);
+const vbMatch = svgSource.match(/viewBox="([\d.\-]+)[ ,]+([\d.\-]+)[ ,]+([\d.\-]+)[ ,]+([\d.\-]+)"/);
+if (!dMatch || !vbMatch) throw new Error('book.svg 解析失败');
+const [, vx, vy, vw, vh] = vbMatch.map(Number);
+const pad = 0.10;
+const norm = ([px, py]) => [
+  pad + (px - vx) / vw * (1 - 2 * pad),
+  pad + (py - vy) / vh * (1 - 2 * pad)
+];
+const polys = flattenPath(dMatch[1]).map(sp => sp.map(norm));
+
+/* 主题绿渐变：accent-2 #46B79D → accent #2E8F80（与应用按钮渐变一致），书本为白色 */
+const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+function makePixelFn(mask, size, SS) {
+  const RES = size * SS;
+  return (nx, ny) => {
+    const t = Math.min(1, Math.max(0, (nx + ny) / 2));
+    const bg = [lerp(0x46, 0x2E, t), lerp(0xB7, 0x8F, t), lerp(0x9D, 0x80, t), 255];
+    const p = Math.min(size - 1, Math.floor(nx * size)) * SS;
+    const q = Math.min(size - 1, Math.floor(ny * size)) * SS;
+    let c = 0;
+    for (let dy = 0; dy < SS; dy++) {
+      const row = (q + dy) * RES;
+      for (let dx = 0; dx < SS; dx++) c += mask[row + p + dx];
+    }
+    const a = c / (SS * SS);
+    if (a <= 0) return bg;
+    return [lerp(bg[0], 255, a), lerp(bg[1], 255, a), lerp(bg[2], 255, a), 255];
+  };
+}
+
+const SS = 4;
+const outDir = path.join(ROOT, 'icons');
 fs.mkdirSync(outDir, { recursive: true });
 for (const size of [192, 512]) {
-  fs.writeFileSync(path.join(outDir, `icon-${size}.png`), png(size, iconPixelFinal));
+  fs.writeFileSync(path.join(outDir, `icon-${size}.png`), png(size, makePixelFn(rasterize(polys, size, SS), size, SS)));
 }
-fs.writeFileSync(path.join(outDir, 'apple-touch-icon.png'), png(180, iconPixelFinal));
-console.log('icons generated:', fs.readdirSync(outDir));
+fs.writeFileSync(path.join(outDir, 'apple-touch-icon.png'), png(180, makePixelFn(rasterize(polys, 180, SS), 180, SS)));
+
+/* 网站图标 favicon.svg：圆角绿渐变底 + 白色书本（矢量，来自同一图标） */
+const margin = 2.2;
+const s = (24 - 2 * margin) / 6;
+const o = margin - 2 * s;
+const favSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#46B79D"/><stop offset="1" stop-color="#2E8F80"/></linearGradient></defs>
+<rect width="24" height="24" rx="5.5" fill="url(#g)"/>
+<path fill="#FFFFFF" transform="translate(${o.toFixed(3)} ${o.toFixed(3)}) scale(${s.toFixed(3)})" d="${dMatch[1]}"/>
+</svg>
+`;
+fs.writeFileSync(path.join(outDir, 'favicon.svg'), favSvg);
+
+console.log('icons generated:', fs.readdirSync(outDir).filter(f => !f.endsWith('.svg') || f === 'favicon.svg'));

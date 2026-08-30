@@ -99,6 +99,62 @@
       Object.values(KEYS).forEach(k => localStorage.removeItem(k));
     },
 
+    /* ── 导出 / 导入（不含 API 配置） ── */
+    exportData() {
+      return {
+        app: 'jlpt-reading',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        data: {
+          records: this.getRecords(),
+          exams: this.getExams(),
+          draft: this.getDraft()
+        }
+      };
+    },
+
+    /* mode: 'merge' 合并去重 | 'replace' 覆盖现有数据（仅数据，不影响 API 设置） */
+    importData(parsed, mode) {
+      if (!parsed || parsed.app !== 'jlpt-reading' || !parsed.data) {
+        throw new Error('文件格式不正确，请使用本应用导出的备份文件');
+      }
+      const d = parsed.data;
+      if (d.records != null && !Array.isArray(d.records)) throw new Error('练习记录数据损坏');
+      if (d.exams != null && !Array.isArray(d.exams)) throw new Error('试卷缓存数据损坏');
+
+      if (mode === 'replace') {
+        write(KEYS.records, d.records || []);
+        write(KEYS.exams, (d.exams || []).slice(0, 20));
+        if (d.draft && d.draft.exam) this.saveDraft(d.draft); else localStorage.removeItem(KEYS.draft);
+      } else {
+        const recs = this.getRecords();
+        const recIds = new Set(recs.map(r => r.id));
+        for (const r of (d.records || [])) {
+          if (r && r.id && !recIds.has(r.id)) { recs.push(r); recIds.add(r.id); }
+        }
+        // 按时间倒序整理
+        recs.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+        write(KEYS.records, recs);
+
+        const exams = this.getExams();
+        const examIds = new Set(exams.map(e => e.id));
+        for (const e of (d.exams || [])) {
+          if (e && e.id && !examIds.has(e.id)) { exams.push(e); examIds.add(e.id); }
+        }
+        exams.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+        write(KEYS.exams, exams.slice(0, 20));
+
+        if (d.draft && d.draft.exam && !this.getDraft()) {
+          this.saveDraft(d.draft);
+        }
+      }
+      return {
+        records: (d.records || []).length,
+        exams: (d.exams || []).length,
+        hasDraft: !!(d.draft && d.draft.exam)
+      };
+    },
+
     /* 统计摘要 */
     getStats() {
       const records = this.getRecords();

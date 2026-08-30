@@ -256,43 +256,75 @@
   }
   $('link-heat-history').addEventListener('click', ev => { ev.preventDefault(); switchTab('history'); });
 
-  /* ═══════════ 考试页 ═══════════ */
+  /* ═══════════ 考试页（逐篇作答：做完一道大题才能下一题） ═══════════ */
   function openExam(exam, answers) {
     state.exam = exam;
     state.answers = answers || {};
+    // 继续草稿时定位到第一篇未完成的大题
+    state.examIndex = 0;
+    for (let i = 0; i < exam.passages.length; i++) {
+      const p = exam.passages[i];
+      if (p.questions.some((_, qi) => (state.answers[p.id] || {})[qi] == null)) {
+        state.examIndex = i; break;
+      }
+    }
     renderExam();
     $('screen-exam').classList.remove('hidden');
-    $('exam-content').scrollTop = 0;
+  }
+
+  function countPassageAnswered(p, a) {
+    return p.questions.filter((_, qi) => a[qi] != null).length;
   }
 
   function renderExam() {
     const exam = state.exam;
+    const p = exam.passages[state.examIndex];
     $('exam-nav-title').textContent = exam.title;
     const box = $('exam-content');
     box.innerHTML = '';
-    let qNo = 0;
 
-    for (const p of exam.passages) {
-      const card = document.createElement('div');
-      card.className = 'card passage-card';
-      let html = `<span class="passage-genre">${escapeHTML(Generator.GENRE_FULL[p.genreTag] || p.genreTag)}</span>
-        <div class="passage-title">${escapeHTML(p.title)}</div>
-        <div class="passage-text">${escapeHTML(p.text)}</div>`;
-      html += `<div class="question-block">`;
-      p.questions.forEach((q, qi) => {
-        qNo++;
-        html += `<div class="review-q question-prompt"><span class="q-num">${qNo}</span><span>${escapeHTML(q.prompt)}</span></div>`;
-        q.options.forEach((opt, oi) => {
-          const sel = state.answers[p.id] && state.answers[p.id][qi] === oi;
-          html += `<button class="option${sel ? ' selected' : ''}" data-p="${p.id}" data-q="${qi}" data-o="${oi}">
-            <span class="opt-mark">${OPT_MARKS[oi]}</span><span>${escapeHTML(opt)}</span></button>`;
-        });
+    // 全局题号：前面各篇题数之和
+    let qNo = 0;
+    for (let i = 0; i < state.examIndex; i++) qNo += exam.passages[i].questions.length;
+
+    const card = document.createElement('div');
+    card.className = 'card passage-card';
+    let html = `<span class="passage-genre">${escapeHTML(Generator.GENRE_FULL[p.genreTag] || p.genreTag)}</span>
+      <div class="passage-title">${escapeHTML(p.title)}</div>
+      <div class="passage-text">${escapeHTML(p.text)}</div>`;
+    html += `<div class="question-block">`;
+    p.questions.forEach((q, qi) => {
+      qNo++;
+      html += `<div class="review-q question-prompt"><span class="q-num">${qNo}</span><span>${escapeHTML(q.prompt)}</span></div>`;
+      q.options.forEach((opt, oi) => {
+        const sel = state.answers[p.id] && state.answers[p.id][qi] === oi;
+        html += `<button class="option${sel ? ' selected' : ''}" data-p="${p.id}" data-q="${qi}" data-o="${oi}">
+          <span class="opt-mark">${OPT_MARKS[oi]}</span><span>${escapeHTML(opt)}</span></button>`;
       });
-      html += `</div>`;
-      card.innerHTML = html;
-      box.appendChild(card);
-    }
+    });
+    html += `</div>`;
+    card.innerHTML = html;
+    box.appendChild(card);
+
     updateExamProgress();
+    box.scrollTop = 0;
+  }
+
+  function updateExamProgress() {
+    const exam = state.exam;
+    const total = exam.totalQuestions;
+    const done = countAnswered(state.answers, exam);
+    $('exam-progress').style.width = `${(done / total * 100).toFixed(1)}%`;
+    $('exam-progress-label').textContent =
+      `第 ${state.examIndex + 1}/${exam.passages.length} 篇 · ${done}/${total} 問`;
+    // 底部按钮状态
+    const p = exam.passages[state.examIndex];
+    const curDone = countPassageAnswered(p, state.answers[p.id] || {});
+    const isLast = state.examIndex === exam.passages.length - 1;
+    const btnNext = $('btn-exam-next');
+    btnNext.classList.toggle('btn-submit', isLast);
+    btnNext.classList.toggle('waiting', curDone < p.questions.length);
+    $('btn-exam-prev').classList.toggle('disabled', state.examIndex === 0);
   }
 
   $('exam-content').addEventListener('click', e => {
@@ -310,12 +342,36 @@
     updateExamProgress();
   });
 
-  function updateExamProgress() {
-    const total = state.exam.totalQuestions;
-    const done = countAnswered(state.answers, state.exam);
-    $('exam-progress').style.width = `${(done / total * 100).toFixed(1)}%`;
-    $('exam-progress-label').textContent = `${done}/${total}`;
-  }
+  $('btn-exam-prev').addEventListener('click', () => {
+    if (state.examIndex > 0) {
+      state.examIndex--;
+      renderExam();
+    }
+  });
+
+  $('btn-exam-next').addEventListener('click', async () => {
+    const exam = state.exam;
+    const p = exam.passages[state.examIndex];
+    const curDone = countPassageAnswered(p, state.answers[p.id] || {});
+    if (curDone < p.questions.length) {
+      toast(`本篇还有 ${p.questions.length - curDone} 問未作答，做完才能进入下一题`);
+      return;
+    }
+    if (state.examIndex < exam.passages.length - 1) {
+      state.examIndex++;
+      renderExam();
+      return;
+    }
+    // 最后一篇 → 交卷（兜底检查整体是否答完）
+    const done = countAnswered(state.answers, exam);
+    if (done < exam.totalQuestions) {
+      const ok = await showDialog('还有未答题目',
+        `已答 ${done}/${exam.totalQuestions} 問，未答的题目将计为错误。确定提交吗？`,
+        [{ label: '继续作答', value: false }, { label: '提交', value: true, bold: true }]);
+      if (!ok) return;
+    }
+    submitExam();
+  });
 
   $('btn-exam-back').addEventListener('click', async () => {
     const done = countAnswered(state.answers, state.exam);
@@ -330,18 +386,6 @@
     $('screen-exam').classList.add('hidden');
     renderHome();
   }
-
-  $('btn-exam-submit').addEventListener('click', async () => {
-    const total = state.exam.totalQuestions;
-    const done = countAnswered(state.answers, state.exam);
-    if (done < total) {
-      const ok = await showDialog('还有未答题目',
-        `已答 ${done}/${total} 問，未答的题目将计为错误。确定提交吗？`,
-        [{ label: '继续作答', value: false }, { label: '提交', value: true, bold: true }]);
-      if (!ok) return;
-    }
-    submitExam();
-  });
 
   function submitExam() {
     const grade = Generator.gradeExam(state.exam, state.answers);
@@ -365,7 +409,7 @@
     showResult(state.exam, grade);
   }
 
-  /* ═══════════ 结果页 ═══════════ */
+  /* ═══════════ 结果页（答题情况总览） ═══════════ */
   function showResult(exam, grade) {
     // grade 为 null 时（回看）按存储的作答重新计分
     const answers = (grade ? state.answers : (exam.answers || {}));
@@ -381,32 +425,32 @@
         <div class="score-big ${cls}">${grade.correct}<span style="font-size:24px"> / ${grade.total}</span></div>
         <div class="score-sub">${exam.title} · 正确率 ${(acc * 100).toFixed(0)}%</div>
       </div>
-      <div class="card"><div class="card-label">各篇得分</div>`;
-    for (const p of exam.passages) {
-      const s = p.score != null ? p.score : grade.detail.filter(d => d.passageId === p.id && d.ok).length;
-      html += `<div class="passage-score-row">
-        <span class="ps-name">${escapeHTML(Generator.GENRE_FULL[p.genreTag] || p.genreTag)} · ${escapeHTML(p.title)}</span>
-        <span class="ps-score">${s} / ${p.questions.length}</span></div>`;
-    }
-    html += `</div><div class="card"><div class="card-label">逐题解析</div>`;
+      <div class="card"><div class="card-label">答题情况 <span class="card-label-sub">点击查看解析</span></div>`;
 
-    let qNo = 0;
-    for (const p of exam.passages) {
-      p.questions.forEach((q, qi) => {
-        qNo++;
-        const d = grade.detail.find(x => x.passageId === p.id && x.qIndex === qi);
-        const userTxt = d && d.user != null ? `${OPT_MARKS[d.user]} ${q.options[d.user]}` : '未作答';
-        const rightTxt = `${OPT_MARKS[q.answer]} ${q.options[q.answer]}`;
-        html += `<div class="review-block">
-          <div class="review-q"><span class="q-num">${qNo}</span>${escapeHTML(q.prompt)}</div>
-          <div class="review-line ${d && d.ok ? 'ans-right' : 'ans-wrong'}"><span class="tag">你的答案</span><span>${escapeHTML(userTxt)}</span></div>
-          ${d && d.ok ? '' : `<div class="review-line ans-right"><span class="tag">正确答案</span><span>${escapeHTML(rightTxt)}</span></div>`}
-          <div class="review-exp">${escapeHTML(q.explanation)}</div>
-        </div>`;
-      });
-    }
+    exam.passages.forEach((p, pi) => {
+      const pc = grade.detail.filter(d => d.passageId === p.id && d.ok).length;
+      const t = p.questions.length;
+      const c = pc === t ? 'good' : pc === 0 ? 'bad' : 'mid';
+      const status = pc === t ? '全对' : pc === 0 ? '全错' : '部分正确';
+      html += `<button class="answer-row" data-p="${pi}">
+        <span class="ar-num">${pi + 1}</span>
+        <span class="ar-body">
+          <span class="ar-genre">${escapeHTML(Generator.GENRE_FULL[p.genreTag] || p.genreTag)}</span>
+          <span class="ar-title">${escapeHTML(p.title)}</span>
+        </span>
+        <span class="ar-right">
+          <span class="ar-score ${c}">${pc}/${t}</span>
+          <span class="ar-status ${c}">${status}</span>
+        </span>
+        <span class="ar-arrow">›</span>
+      </button>`;
+    });
     html += `</div><div style="height:24px"></div>`;
     box.innerHTML = html;
+
+    box.querySelectorAll('.answer-row').forEach(row =>
+      row.addEventListener('click', () => showReview(+row.dataset.p)));
+
     $('screen-result').classList.remove('hidden');
     box.scrollTop = 0;
   }
@@ -414,6 +458,173 @@
   $('btn-result-back').addEventListener('click', () => {
     $('screen-result').classList.add('hidden');
     renderHome();
+  });
+
+  /* ═══════════ 解析页（上：原文高亮 · 下：原题+逐选项解析，左右滑动切小题） ═══════════ */
+  // 在原文中定位所有证据片段，生成带高亮 span 的 HTML（不重叠）
+  function buildHighlightHTML(text, evidences) {
+    const spans = [];
+    for (const ev of evidences) {
+      const str = (ev.str || '').trim();
+      if (!str) continue;
+      let idx = 0;
+      for (;;) {
+        const i = text.indexOf(str, idx);
+        if (i < 0) break;
+        spans.push({ start: i, end: i + str.length, key: ev.key });
+        idx = i + str.length;
+      }
+    }
+    spans.sort((a, b) => a.start - b.start || b.end - a.end);
+    const picked = [];
+    let lastEnd = -1;
+    for (const s of spans) {
+      if (s.start >= lastEnd) { picked.push(s); lastEnd = s.end; }
+    }
+    let html = '', pos = 0;
+    for (const s of picked) {
+      html += escapeHTML(text.slice(pos, s.start));
+      html += `<span class="ev" data-ev="${s.key}">${escapeHTML(text.slice(s.start, s.end))}</span>`;
+      pos = s.end;
+    }
+    html += escapeHTML(text.slice(pos));
+    return html;
+  }
+
+  function setActiveEvidence(key, scroll) {
+    const els = Array.from(document.querySelectorAll('#review-passage .ev'));
+    // 证据片段可能被更长的片段（含后续标点）合并，此时回退到对应小题的整体证据
+    let hit = els.filter(el => el.dataset.ev === key);
+    if (!hit.length && /^q\d+o\d+$/.test(key)) {
+      const parentKey = key.replace(/o\d+$/, '');
+      hit = els.filter(el => el.dataset.ev === parentKey);
+    }
+    els.forEach(el => el.classList.toggle('active', hit.includes(el)));
+    if (scroll) {
+      const el = hit[0];
+      if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+
+  // 当前小题的默认高亮：正确答案的 optionEvidence → evidence
+  function defaultEvidenceKey(p, qi) {
+    const q = p.questions[qi];
+    if (q.optionEvidence && q.optionEvidence[q.answer]) return `q${qi}o${q.answer}`;
+    return q.evidence ? `q${qi}` : '';
+  }
+
+  function showReview(passageIndex) {
+    const { exam, grade } = state.result;
+    const p = exam.passages[passageIndex];
+    state.review = { passageIndex, qIndex: 0 };
+
+    $('review-nav-title').textContent = p.title;
+    // 全局起始题号
+    let qStart = 0;
+    for (let i = 0; i < passageIndex; i++) qStart += exam.passages[i].questions.length;
+
+    // ── 上半：原文（带证据高亮占位） ──
+    const evidences = [];
+    p.questions.forEach((q, qi) => {
+      if (q.evidence) evidences.push({ key: `q${qi}`, str: q.evidence });
+      (q.optionEvidence || []).forEach((s, oi) => {
+        if (s) evidences.push({ key: `q${qi}o${oi}`, str: s });
+      });
+    });
+    $('review-passage').innerHTML =
+      `<span class="passage-genre">${escapeHTML(Generator.GENRE_FULL[p.genreTag] || p.genreTag)}</span>
+       <div class="review-passage-text">${buildHighlightHTML(p.text, evidences)}</div>`;
+    $('review-passage').scrollTop = 0;
+
+    // ── 下半：小题分页 ──
+    const pages = $('review-pages');
+    let html = '';
+    p.questions.forEach((q, qi) => {
+      const d = grade.detail.find(x => x.passageId === p.id && x.qIndex === qi);
+      const user = d ? d.user : null;
+      html += `<div class="review-page"><div class="review-page-inner">`;
+      html += `<div class="review-q"><span class="q-num">${qStart + qi + 1}</span><span>${escapeHTML(q.prompt)}</span></div>`;
+      if (q.optionExplanations && q.optionExplanations.length === 4) {
+        q.options.forEach((opt, oi) => {
+          const isAns = oi === q.answer;
+          const isUser = user === oi;
+          let badge = '', badgeCls = '';
+          if (isAns) { badge = '✓ 正确答案'; badgeCls = 'b-ok'; }
+          else if (isUser) { badge = '✗ 你的答案'; badgeCls = 'b-wrong'; }
+          html += `<div class="r-opt${isAns ? ' opt-ok' : isUser ? ' opt-wrong' : ''}" data-qi="${qi}" data-oi="${oi}">
+            <div class="r-opt-head">
+              <span class="opt-mark">${OPT_MARKS[oi]}</span>
+              <span class="r-opt-text">${escapeHTML(opt)}</span>
+              ${badge ? `<span class="r-opt-badge ${badgeCls}">${badge}</span>` : ''}
+            </div>
+            <div class="r-opt-exp">${escapeHTML(q.optionExplanations[oi])}</div>
+          </div>`;
+        });
+      } else {
+        // 兼容旧数据：整体解析
+        html += `<div class="review-line ${d && d.ok ? 'ans-right' : 'ans-wrong'}"><span class="tag">你的答案</span><span>${user != null ? `${OPT_MARKS[user]} ${escapeHTML(q.options[user])}` : '未作答'}</span></div>
+          <div class="review-line ans-right"><span class="tag">正确答案</span><span>${OPT_MARKS[q.answer]} ${escapeHTML(q.options[q.answer])}</span></div>
+          <div class="review-exp">${escapeHTML(q.explanation)}</div>`;
+      }
+      html += `</div></div>`;
+    });
+    pages.innerHTML = html;
+
+    // 指示点
+    const dots = $('review-dots');
+    dots.innerHTML = p.questions.map((_, i) =>
+      `<span class="review-dot${i === 0 ? ' active' : ''}"></span>`).join('');
+    pages.scrollLeft = 0;
+
+    // 小题页切换（滑动 + 按钮）
+    const goTo = (i, smooth = true) => {
+      const page = pages.children[i];
+      if (page) pages.scrollTo({ left: page.offsetLeft - pages.children[0].offsetLeft, behavior: smooth ? 'smooth' : 'auto' });
+    };
+    $('btn-review-prev').onclick = () => goTo(Math.max(0, state.review.qIndex - 1));
+    $('btn-review-next').onclick = () => goTo(Math.min(p.questions.length - 1, state.review.qIndex + 1));
+    pages.onscroll = () => {
+      const base = pages.children[0].offsetLeft;
+      let idx = 0, best = Infinity;
+      Array.from(pages.children).forEach((c, i) => {
+        const dist = Math.abs(c.offsetLeft - base - pages.scrollLeft);
+        if (dist < best) { best = dist; idx = i; }
+      });
+      if (idx === state.review.qIndex) return;
+      state.review.qIndex = idx;
+      syncReviewUI(p, qStart);
+    };
+
+    syncReviewUI(p, qStart);
+    $('screen-result').classList.add('hidden');
+    $('screen-review').classList.remove('hidden');
+  }
+
+  function syncReviewUI(p, qStart) {
+    const qi = state.review.qIndex;
+    $('review-dots').querySelectorAll('.review-dot').forEach((d, i) =>
+      d.classList.toggle('active', i === qi));
+    $('review-q-label').textContent = `問 ${qi + 1}/${p.questions.length}`;
+    $('btn-review-prev').classList.toggle('disabled', qi === 0);
+    $('btn-review-next').classList.toggle('disabled', qi === p.questions.length - 1);
+    setActiveEvidence(defaultEvidenceKey(p, qi), false);
+  }
+
+  // 点击某选项解析 → 高亮该选项在原文中的依据
+  $('review-pages').addEventListener('click', e => {
+    const row = e.target.closest('.r-opt');
+    if (!row || !state.review) return;
+    const p = state.result.exam.passages[state.review.passageIndex];
+    const q = p.questions[+row.dataset.qi], oi = +row.dataset.oi;
+    const key = (q.optionEvidence && q.optionEvidence[oi])
+      ? `q${row.dataset.qi}o${oi}`
+      : defaultEvidenceKey(p, +row.dataset.qi);
+    setActiveEvidence(key, true);
+  });
+
+  $('btn-review-back').addEventListener('click', () => {
+    $('screen-review').classList.add('hidden');
+    $('screen-result').classList.remove('hidden');
   });
 
   /* ═══════════ 记录页 ═══════════ */
@@ -527,6 +738,63 @@
     } catch (e) {
       box.classList.add('err');
       box.textContent = `✗ ${e.message}`;
+    }
+  });
+
+  /* ───── 导出 / 导入数据（不含 API 配置） ───── */
+  $('btn-export-data').addEventListener('click', () => {
+    const payload = Storage.exportData();
+    const n = payload.data.records.length;
+    if (!n && !payload.data.exams.length && !payload.data.draft) {
+      toast('暂无可导出的数据');
+      return;
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    a.download = `jlpt-reading-backup-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    toast(`已导出 ${n} 条练习记录`);
+  });
+
+  $('btn-import-data').addEventListener('click', () => $('import-file-input').click());
+
+  $('import-file-input').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    e.target.value = ''; // 允许重复选择同一文件
+    if (!file) return;
+    let parsed;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      showDialog('导入失败', '文件无法解析，请选择本应用导出的 JSON 备份文件。', [{ label: '好' }]);
+      return;
+    }
+    if (!parsed || parsed.app !== 'jlpt-reading' || !parsed.data) {
+      showDialog('导入失败', '文件格式不正确，请使用本应用导出的备份文件。', [{ label: '好' }]);
+      return;
+    }
+    const nRec = (parsed.data.records || []).length;
+    const nExam = (parsed.data.exams || []).length;
+    const mode = await showDialog('导入数据',
+      `备份包含 ${nRec} 条练习记录、${nExam} 套试卷缓存。\n\n合并：保留现有数据，追加备份中的新数据。\n覆盖：删除现有练习数据后导入备份（不影响 API 配置）。`,
+      [
+        { label: '取消', value: null },
+        { label: '合并', value: 'merge' },
+        { label: '覆盖导入', value: 'replace', destructive: true, bold: true }
+      ]);
+    if (!mode) return;
+    try {
+      const r = Storage.importData(parsed, mode);
+      toast(`导入成功：${r.records} 条记录 / ${r.exams} 套试卷`);
+      renderHome();
+    } catch (err) {
+      showDialog('导入失败', err.message || '导入过程中出现错误。', [{ label: '好' }]);
     }
   });
 

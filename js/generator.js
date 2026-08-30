@@ -48,7 +48,11 @@
 - ちょうど${qCount}問。 各問4択（選択肢は必ず4つ）。
 - 実際のJLPTの設問スタイルに合わせること（例:「〜について最もよく表しているのはどれか」「〜とあるが、なぜか」「この文章の内容と合っているものはどれか」; 情報検索は「〜できるのはどれか」「〜の条件をすべて満たすのはどれか」等）。
 - 各問のanswer（正解のインデックス0-3）は分散させ、偏らないようにすること。
-- explanationには、根拠となる本文中の部分と各選択肢の判断理由を日本語で簡潔に書くこと。
+- 各問には必ず次のフィールドを含めること:
+  - evidence: 正解の根拠となる本文中の一文を、本文から一字一句変更せずそのまま引用する（引用符を付けず、改行を含めない）。
+  - explanation: 問題全体の解説（日本語）。
+  - optionExplanations: 4つの選択肢それぞれについての解説を配列で書く。正解にはなぜ正しいかを、誤りの選択肢には本文のどこに矛盾・不一致するかを日本語で簡潔に書くこと。
+  - optionEvidence: 4つの選択肢それぞれの判断材料となる本文中の語句・文をそのまま引用した配列。根拠を指摘できない選択肢は ""（空文字）にすること。
 
 【出力形式】
 以下のJSON形式のみを出力すること。マークダウンのコードブロックや説明文は一切書かないこと。
@@ -57,7 +61,11 @@
   "title": "文章のタイトル",
   "text": "本文（改行は\\nで表現）",
   "questions": [
-    { "prompt": "設問", "options": ["選1", "選2", "選3", "選4"], "answer": 0, "explanation": "解説" }
+    { "prompt": "設問", "options": ["選1", "選2", "選3", "選4"], "answer": 0,
+      "evidence": "本文からの根拠の一文（そのまま引用）",
+      "explanation": "問題全体の解説",
+      "optionExplanations": ["選1の解説", "選2の解説", "選3の解説", "選4の解説"],
+      "optionEvidence": ["選1の根拠", "選2の根拠", "選3の根拠", "選4の根拠"] }
   ]
 }`;
   }
@@ -71,6 +79,9 @@
       if (!q.prompt || !Array.isArray(q.options) || q.options.length !== 4) return '选项应为4个';
       if (!Number.isInteger(q.answer) || q.answer < 0 || q.answer > 3) return 'answer 越界';
       if (typeof q.explanation !== 'string' || !q.explanation.trim()) return '缺少解析';
+      if (typeof q.evidence !== 'string' || !q.evidence.trim()) return '缺少原文依据 evidence';
+      if (!Array.isArray(q.optionExplanations) || q.optionExplanations.length !== 4 ||
+        q.optionExplanations.some(s => !String(s || '').trim())) return '选项解析应为4条';
     }
     return null;
   }
@@ -142,7 +153,10 @@
           prompt: String(q.prompt),
           options: q.options.map(o => String(o)),
           answer: q.answer,
-          explanation: String(q.explanation)
+          explanation: String(q.explanation),
+          evidence: typeof q.evidence === 'string' ? q.evidence : '',
+          optionExplanations: Array.isArray(q.optionExplanations) ? q.optionExplanations.map(s => String(s || '')) : null,
+          optionEvidence: Array.isArray(q.optionEvidence) ? q.optionEvidence.map(s => typeof s === 'string' ? s : '') : null
         }));
         return p;
       } catch (e) {

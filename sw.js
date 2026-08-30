@@ -1,5 +1,5 @@
 /* JLPT 読解トレーナー Service Worker — App Shell 离线缓存 */
-const CACHE = 'jlpt-reading-v3';
+const CACHE = 'jlpt-reading-v7';
 const SHELL = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const SHELL = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
+  './icons/favicon.svg',
   './icons/svg/book.svg',
   './icons/svg/ranking.svg',
   './icons/svg/settings.svg',
