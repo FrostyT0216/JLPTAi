@@ -16,7 +16,10 @@
     model: 'gpt-4o-mini',
     temperature: 0.7,
     jsonMode: true,
-    theme: 'auto' // auto | light | dark
+    theme: 'auto', // auto | light | dark
+    accent: 'green', // green | blue | purple | pink | orange | custom
+    accentCustom: '', // 自定义主题色（#RRGGBB）
+    background: 'blob' // blob 波动色块动画 | bing Bing 每日图片
   };
 
   function read(key, fallback) {

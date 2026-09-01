@@ -105,6 +105,8 @@
     wrap.appendChild(months);
     wrap.appendChild(grid);
     container.appendChild(wrap);
+    // 默认滚动到最右侧（最新日期）
+    requestAnimationFrame(() => { wrap.scrollLeft = wrap.scrollWidth; });
   }
 
   window.Heatmap = { render, fmtDate };

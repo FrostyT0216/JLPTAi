@@ -4,12 +4,12 @@
 
   const TIMEOUT_MS = 120000;
 
-  /**
-   * 调用 chat/completions，返回 assistant 文本。
-   * @param {object} settings Storage.getSettings()
-   * @param {Array<{role,content}>} messages
-   * @param {{jsonMode?:boolean, temperature?:number, signal?:AbortSignal}} opts
-   */
+    /**
+     * 调用 chat/completions，返回 assistant 文本。
+     * @param {object} settings Storage.getSettings()
+     * @param {Array<{role,content}>} messages
+     * @param {{jsonMode?:boolean, temperature?:number, signal?:AbortSignal, onUsage?:(usage:object)=>void}} opts
+     */
   async function chat(settings, messages, opts = {}) {
     const base = (settings.baseURL || '').replace(/\/+$/, '');
     const url = /\/chat\/completions$/.test(base) ? base : base + '/chat/completions';
@@ -63,6 +63,9 @@
     }
 
     const data = await res.json();
+    if (opts.onUsage && data.usage) {
+      try { opts.onUsage(data.usage); } catch (_) { /* 忽略回调异常 */ }
+    }
     const content = data.choices && data.choices[0] && data.choices[0].message &&
       data.choices[0].message.content;
     if (typeof content !== 'string' || !content.trim()) {

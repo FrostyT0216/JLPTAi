@@ -7,7 +7,7 @@
 
   /* ───── 全局状态 ───── */
   const state = {
-    mode: 'full', level: 'N5', genre: '短文', count: 5,
+    mode: 'full', level: 'N5',
     generating: false, abortCtrl: null,
     exam: null, answers: {},          // 进行中的考试
     result: null,                      // {exam, grade, record}
@@ -58,18 +58,47 @@
   document.querySelectorAll('.tab-item').forEach(el =>
     el.addEventListener('click', () => switchTab(el.dataset.tab)));
 
+  /* ───── 覆盖层屏幕动画（上滑进入 / 下滑退出） ───── */
+  function hideScreen(id, cb) {
+    const el = $(id);
+    if (el.classList.contains('hidden')) { if (cb) cb(); return; }
+    el.classList.add('closing');
+    setTimeout(() => {
+      el.classList.add('hidden');
+      el.classList.remove('closing');
+      if (cb) cb();
+    }, 280);
+  }
+
+  /* ───── 设置二级页面（iOS 推入 / 退出） ───── */
+  function openSub(id) {
+    $(id).classList.remove('hidden', 'closing');
+  }
+  function closeSub(id) {
+    hideScreen(id);
+  }
+  document.querySelectorAll('.cell-row[data-sub]').forEach(btn =>
+    btn.addEventListener('click', () => openSub(btn.dataset.sub)));
+  document.querySelectorAll('.sub-back').forEach(btn =>
+    btn.addEventListener('click', () => closeSub(btn.closest('.subscreen').id)));
+
   /* ───── 主题（跟随系统 / 浅色 / 深色） ───── */
   const mqDark = window.matchMedia('(prefers-color-scheme: dark)');
   const THEME_COLORS = { light: '#E9F1EC', dark: '#0A100E' };
+
+  function resolvedMode() {
+    const t = Storage.getSettings().theme || 'auto';
+    return (t === 'dark' || (t !== 'light' && mqDark.matches)) ? 'dark' : 'light';
+  }
 
   function applyTheme(theme) {
     const root = document.documentElement;
     if (theme === 'light' || theme === 'dark') root.dataset.theme = theme;
     else delete root.dataset.theme; // auto：交给 prefers-color-scheme
-    const resolved = (theme === 'dark' || (theme !== 'light' && mqDark.matches))
-      ? THEME_COLORS.dark : THEME_COLORS.light;
+    const mode = resolvedMode();
     document.querySelectorAll('meta[name="theme-color"]')
-      .forEach(m => m.setAttribute('content', resolved));
+      .forEach(m => m.setAttribute('content', mode === 'dark' ? THEME_COLORS.dark : THEME_COLORS.light));
+    applyAccent(mode);
     updateThemeHint();
   }
 
@@ -95,6 +124,174 @@
     applyTheme(btn.dataset.theme);
   });
 
+  /* ───── 主题色（强调色预设 / 自定义取色） ───── */
+  const ACCENTS = {
+    green:  { name: '苍绿', light: '#2E8F80', dark: '#59C7A9' },
+    blue:   { name: '海洋', light: '#2F77C2', dark: '#63A5F2' },
+    purple: { name: '暮紫', light: '#7B5CD6', dark: '#A98BF2' },
+    pink:   { name: '樱粉', light: '#D14E86', dark: '#F07EB4' },
+    orange: { name: '暖橙', light: '#D2762A', dark: '#F2A45C' }
+  };
+  // 覆盖的 CSS 变量；默认苍绿时移除内联覆盖，回到样式表原始值
+  const ACCENT_VARS = ['--accent', '--accent-2', '--accent-soft', '--accent-shadow', '--blob-1', '--blob-3'];
+
+  function hexToRgb(hex) {
+    const v = hex.replace('#', '');
+    const h = v.length === 3 ? v.split('').map(c => c + c).join('') : v;
+    return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16));
+  }
+  function mixHex(hex, other, t) {
+    const a = hexToRgb(hex), b = hexToRgb(other);
+    return '#' + a.map((x, i) =>
+      Math.round(x + (b[i] - x) * t).toString(16).padStart(2, '0')).join('');
+  }
+  const rgbaStr = (rgb, a) => `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${a})`;
+  function luminance(hex) {
+    const [r, g, b] = hexToRgb(hex).map(x => x / 255);
+    return .2126 * r + .7152 * g + .0722 * b;
+  }
+
+  function applyAccent(mode) {
+    const root = document.documentElement;
+    const s = Storage.getSettings();
+    const customOk = s.accent === 'custom' && /^#[0-9a-fA-F]{6}$/.test(s.accentCustom || '');
+    let hex = customOk ? s.accentCustom : (ACCENTS[s.accent] ? ACCENTS[s.accent][mode] : null);
+    if (!hex) {
+      ACCENT_VARS.forEach(v => root.style.removeProperty(v));
+    } else {
+      const dark = mode === 'dark';
+      // 深色模式下若自定义色过暗则提亮，保证对比度
+      if (dark && luminance(hex) < .45) hex = mixHex(hex, '#FFFFFF', .26);
+      const rgb = hexToRgb(hex);
+      root.style.setProperty('--accent', hex);
+      root.style.setProperty('--accent-2', dark ? mixHex(hex, '#0A100E', .18) : mixHex(hex, '#FFFFFF', .24));
+      root.style.setProperty('--accent-soft', rgbaStr(rgb, dark ? .16 : .13));
+      root.style.setProperty('--accent-shadow', rgbaStr(rgb, dark ? .30 : .42));
+      root.style.setProperty('--blob-1', rgbaStr(rgb, dark ? .34 : .40));
+      root.style.setProperty('--blob-3', rgbaStr(hexToRgb(mixHex(hex, dark ? '#0A100E' : '#FFFFFF', .55)), dark ? .26 : .50));
+    }
+    syncAccentUI();
+  }
+
+  function syncAccentUI() {
+    const s = Storage.getSettings();
+    const row = $('swatch-row');
+    if (row) row.querySelectorAll('.swatch').forEach(sw => {
+      const key = sw.dataset.accent || 'custom';
+      sw.classList.toggle('active', (s.accent || 'green') === key);
+      if (key === 'custom') {
+        const c = /^#[0-9a-fA-F]{6}$/.test(s.accentCustom || '') ? s.accentCustom : '#888888';
+        sw.style.setProperty('--sw', c);
+        sw.style.setProperty('--sw-dark', c);
+      }
+    });
+    const hint = $('accent-hint');
+    if (hint) hint.textContent = s.accent === 'custom'
+      ? '使用自定义取色器选择的主题色'
+      : `当前主题色：${(ACCENTS[s.accent] || ACCENTS.green).name} · 浅色 / 深色自动适配`;
+  }
+
+  $('swatch-row').addEventListener('click', e => {
+    const sw = e.target.closest('.swatch');
+    if (!sw || sw.classList.contains('swatch-custom')) return;
+    Storage.saveSettings({ accent: sw.dataset.accent });
+    applyAccent(resolvedMode());
+  });
+
+  $('accent-custom-input').addEventListener('input', e => {
+    Storage.saveSettings({ accent: 'custom', accentCustom: e.target.value });
+    applyAccent(resolvedMode());
+  });
+
+  /* ───── 背景（波动色块动画 / Bing 每日图片） ───── */
+  // 均为 302 跳转到 Bing 当日壁纸的镜像，<img> 跨域加载无需 CORS
+  const BING_SOURCES = [
+    'https://bing.ee123.net/img/',
+    'https://api.paugram.com/bing/',
+    'https://bing.img.run/1920x1080.php',
+    'https://api.dujin.org/bing/1920.php'
+  ];
+  const BING_CACHE_KEY = 'jlpt.bingbg.v1';
+
+  function bingDayKey() {
+    const d = new Date();
+    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  }
+
+  function bingCacheRead(day) {
+    try {
+      const v = JSON.parse(localStorage.getItem(BING_CACHE_KEY) || 'null');
+      return (v && v.day === day && v.src) ? v : null;
+    } catch { return null; }
+  }
+
+  function bingCacheWrite(day, src) {
+    try { localStorage.setItem(BING_CACHE_KEY, JSON.stringify({ day, src })); } catch (e) { /* 忽略 */ }
+  }
+
+  function updateBgHint() {
+    const hint = $('bg-hint');
+    if (!hint) return;
+    hint.textContent = (Storage.getSettings().background || 'blob') === 'bing'
+      ? '使用 Bing 每日一图作为全局背景（需联网，加载失败自动回退色块动画）'
+      : '液态玻璃折射源：柔和漂移的随机波动色块动画';
+  }
+
+  function applyBackground(bg) {
+    const wrap = $('bg'), img = $('bg-img');
+    const on = bg === 'bing';
+    wrap.classList.toggle('img-mode', on);
+    updateBgHint();
+    if (!on) return;
+    img.hidden = false;
+    const key = bingDayKey();
+    if (img.dataset.day === key && img.getAttribute('src')) return;
+    img.dataset.day = key;
+
+    // 当日已成功的镜像源优先尝试，避免每次启动重新探测失效源
+    const cached = bingCacheRead(key);
+    const queue = cached ? [cached.src] : [];
+    BING_SOURCES.forEach(s => { if (!queue.includes(s)) queue.push(s); });
+
+    let idx = 0;
+    const tryNext = () => {
+      if (idx < queue.length) {
+        img.src = queue[idx++] + '?t=' + encodeURIComponent(key);
+      } else {
+        // 全部源失败：回退色块动画，仅提示一次
+        if (img.dataset.fallbackWarned) return;
+        img.dataset.fallbackWarned = '1';
+        Storage.saveSettings({ background: 'blob' });
+        syncBackgroundUI();
+        applyBackground('blob');
+        toast('Bing 每日图片加载失败，已回退为色块动画');
+      }
+    };
+    img.onerror = tryNext;
+    img.onload = () => {
+      if (img.naturalWidth > 0) {
+        img.dataset.fallbackWarned = '';
+        bingCacheWrite(key, queue[idx - 1]);
+      }
+    };
+    tryNext();
+  }
+
+  function syncBackgroundUI() {
+    const cur = Storage.getSettings().background || 'blob';
+    $('seg-background').querySelectorAll('.seg-item').forEach(x =>
+      x.classList.toggle('active', x.dataset.bg === cur));
+  }
+
+  $('seg-background').addEventListener('click', e => {
+    const btn = e.target.closest('.seg-item');
+    if (!btn) return;
+    Storage.saveSettings({ background: btn.dataset.bg });
+    $('bg-img').dataset.fallbackWarned = '';
+    syncBackgroundUI();
+    applyBackground(btn.dataset.bg);
+  });
+
   /* ═══════════ 首页 ═══════════ */
   function bindSegmented(id, attr, cb) {
     $(id).addEventListener('click', e => {
@@ -109,11 +306,8 @@
   bindSegmented('seg-level', 'level', v => { state.level = v; updateModeHint(); });
   bindSegmented('seg-mode', 'mode', v => {
     state.mode = v;
-    $('drill-options').classList.toggle('hidden', v !== 'drill');
     updateModeHint();
   });
-  bindSegmented('seg-genre', 'genre', v => { state.genre = v; });
-  bindSegmented('seg-count', 'count', v => { state.count = +v; updateModeHint(); });
 
   function updateModeHint() {
     const hint = $('mode-hint');
@@ -122,8 +316,13 @@
       const ps = Generator.FULL_SET[state.level].length;
       hint.textContent = `${state.level} 整套模拟：${ps} 篇文章 / 共 ${total} 問（接近真实考试読解部分的题量，生成约需 1〜3 分钟）`;
     } else {
-      const g = Generator.GENRE_FULL[state.genre];
-      hint.textContent = `${state.level} ${g}：共 ${state.count} 問（生成约需 1〜2 分钟）`;
+      const pool = Generator.RANDOM_TYPES[state.level];
+      const qRange = pool.map(g => Generator.GENRE_QCOUNT[g]);
+      const min = Math.min(...qRange.map(r => r[0]));
+      const max = Math.max(...qRange.map(r => r[1]));
+      const detail = pool.map(g =>
+        `${Generator.GENRE_FULL[g]} ${Generator.GENRE_QCOUNT[g][0]}〜${Generator.GENRE_QCOUNT[g][1]}問`).join('・');
+      hint.textContent = `${state.level} 随机一题：从该级别 ${pool.length} 种题型中随机抽取 1 道（${min}〜${max} 問）——${detail}`;
     }
   }
 
@@ -152,17 +351,21 @@
 
     $('btn-start').disabled = true;
     $('gen-status').classList.remove('hidden');
+    $('gen-token').textContent = '';
     setProgress(0, '正在连接 API…');
 
     const config = state.mode === 'full'
       ? { mode: 'full', level: state.level }
-      : { mode: 'drill', level: state.level, genre: state.genre, count: state.count };
+      : { mode: 'random', level: state.level };
 
     try {
       const settings = Storage.getSettings();
       const exam = await Generator.generateExam(settings, config, {
         signal: state.abortCtrl.signal,
-        onProgress: (done, total, label) => setProgress(done / total, label)
+        onProgress: (done, total, label) => setProgress(done / total, label),
+        onTokens: n => {
+          $('gen-token').textContent = `已消耗 ${n.toLocaleString('en-US')} tokens`;
+        }
       });
       state.exam = exam;
       state.answers = {};
@@ -419,8 +622,7 @@
   });
 
   async function closeExam() {
-    $('screen-exam').classList.add('hidden');
-    renderHome();
+    hideScreen('screen-exam', renderHome);
   }
 
   function submitExam() {
@@ -441,7 +643,7 @@
     state.exam.answers = state.answers;
     Storage.saveExam(state.exam);
     Storage.clearDraft();
-    $('screen-exam').classList.add('hidden');
+    hideScreen('screen-exam');
     showResult(state.exam, grade);
   }
 
@@ -492,8 +694,7 @@
   }
 
   $('btn-result-back').addEventListener('click', () => {
-    $('screen-result').classList.add('hidden');
-    renderHome();
+    hideScreen('screen-result', renderHome);
   });
 
   /* ═══════════ 解析页（上：原文高亮 · 下：原题+逐选项解析，左右滑动切小题） ═══════════ */
@@ -632,7 +833,7 @@
     };
 
     syncReviewUI(p, qStart);
-    $('screen-result').classList.add('hidden');
+    // 结果页保留在解析页下方（iOS 层级式推入），返回时无需重建
     $('screen-review').classList.remove('hidden');
   }
 
@@ -659,8 +860,7 @@
   });
 
   $('btn-review-back').addEventListener('click', () => {
-    $('screen-review').classList.add('hidden');
-    $('screen-result').classList.remove('hidden');
+    hideScreen('screen-review');
   });
 
   /* ═══════════ 记录页 ═══════════ */
@@ -729,6 +929,10 @@
     $('seg-theme').querySelectorAll('.seg-item').forEach(x =>
       x.classList.toggle('active', (x.dataset.theme || 'auto') === (s.theme || 'auto')));
     applyTheme(s.theme || 'auto');
+    $('accent-custom-input').value =
+      /^#[0-9a-fA-F]{6}$/.test(s.accentCustom || '') ? s.accentCustom : '#2E8F80';
+    syncBackgroundUI();
+    applyBackground(s.background || 'blob');
   }
 
   function saveSettingsUI() {

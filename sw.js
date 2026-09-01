@@ -1,5 +1,5 @@
 /* JLPT 読解トレーナー Service Worker — App Shell 离线缓存 */
-const CACHE = 'jlpt-reading-v7';
+const CACHE = 'jlpt-reading-v10';
 const SHELL = [
   './',
   './index.html',
